@@ -1,0 +1,29 @@
+ExtClassLoader和AppClassLoader都是在Launcher构造器里被创建的
+
+ExtClassLoader的创建过程：
+Launcher构造器：extcl = ExtClassLoader#getExtClassLoader
+	ExtClassLoader#getExtClassLoader检查单例是否存在（双重检测），不存在则调用ExtClassLoader#createExtClassLoader
+		ExtClassLoader#createExtClassLoader局部成员 File[] dirs = ExtClassLoader#getExtDirs
+			ExtClassLoader#getExtDirs获取系统属性”java.ext.dirs”的值，将其遍历创建File[]并返回
+		ExtClassLoader#createExtClassLoader调用ExtClassLoader的构造器，并传入dirs
+		ExtClassLoader构造器：super(getExtURLs(dirs), null, factory)调用URLClassLoader的构造器(URL[] urls, ClassLoader parent,URLStreamHandlerFactory factory)
+			ExtClassLoader#getExtURLs(File[] dirs)获得由每个文件的URL组成的URL[]
+			第二个参数为null，表示父ClassLoader是BootstrapClassLoader
+			第三个参数factory是Launcher的静态类成员，是用于加载系统协议处理程序的流处理程序工厂
+		URLClassLoader的构造器：ucp = new URLClassPath(urls, factory, acc);
+		URLClassPath用于维护 URL 的搜索路径，以便从 JAR 文件和目录中加载类和资源。
+			URLClassPath的构造器：类私有成员jarHandler = factory.createURLStreamHandler("jar");这里会得到一个sun.net.www.protocol.jar.Handler对象
+
+AppClassLoader的创建过程：
+Launcher构造器：Launcher的私有类成员loader = AppClassLoader.getAppClassLoader(extcl)
+	AppClassLoader#getAppClassLoader获取了系统属性”java.class.path”的值，根据该值获得classpath下的所有文件File[] path，再将path转为URL[] urls
+	new AppClassLoader(urls, extcl)调用AppClassLoader的构造器AppClassLoader(URL[] urls, ClassLoader parent)
+	AppClassLoader的构造器：super(urls, parent, factory);
+	AppClassLoader的构造器：AppClassLoader的类成员ucp = SharedSecrets.getJavaNetAccess().getURLClassPath(this);
+	这个ucp也是AppClassLoader相比ExtClassLoader多出来的类成员，因为URLClassLoader的ucp是私有的，为了让AppClassLoader也能访问，引入了SharedSecrets类
+		SharedSecrets.getJavaNetAccess()返回SharedSecrets的私有静态成员javaNetAccess，该成员的set操作是在URLClassLoader的静态代码块中完成的
+		在URLClassLoader的静态代码块中调用了SharedSecrets.setJavaNetAccess(JavaNetAccess jna)方法，传入了一个匿名实现类
+            该匿名类的getURLClassPath (URLClassLoader u)方法返回了u.ucp，这样使得外界可以获取URLClassLoader的私有ucp
+            也就是说ucp = SharedSecrets.getJavaNetAccess().getURLClassPath(this);AppClassLoader把自己的父类URLClassLoader对象的ucp赋给了自己的ucp
+
+Launcher构造器创建完AppClassLoader后执行了Thread.currentThread().setContextClassLoader(loader);
