@@ -1,0 +1,39 @@
+Resources的几种获取资源方式的区别
+return类型  方法名称(入参)
+URL getResourceURL(String resource)
+URL getResourceURL(ClassLoader loader, String resource)
+InputStream getResourceAsStream(String resource)
+InputStream getResourceAsStream(ClassLoader loader, String resource)
+Properties getResourceAsProperties(String resource)
+Properties getResourceAsProperties(ClassLoader loader, String resource)
+Reader getResourceAsReader(String resource)
+Reader getResourceAsReader(ClassLoader loader, String resource)
+File getResourceAsFile(String resource)
+File getResourceAsFile(ClassLoader loader, String resource)
+InputStream getUrlAsStream(String urlString)
+Reader getUrlAsReader(String urlString)
+Properties getUrlAsProperties(String urlString)
+
+除了通过String类型的路径获取资源，还可以传入指定的ClassLoader，Mybatis是这样使用ClassLoader来获取资源的
+Resources.(URL)getResourceURL(String resource)
+    (URL)getResourceURL(String Resource)调用重载方法(URL)getResourceURL(ClassLoader loader, String resource)，
+    并传入getResourceURL(null, resource)
+        (URL)getResourceURL(ClassLoader loader, String resource)里，
+        URL url = classLoaderWrapper.getResourceAsURL(resource, loader)
+            ClassLoaderWrapper.(URL)getResourceAsURL(String resource, ClassLoader classLoader)里，
+            调用重载方法(URL)getResourceAsURL(String resource, ClassLoader[] classLoader)，
+            getResourceAsURL(resource, getClassLoaders(classLoader))
+                ClassLoaderWrapper.(ClassLoader[])getClassLoaders(ClassLoader classLoader)新建一组ClassLoader，
+                这组ClassLoader在数组内的顺序为：传入的classLoader -> defaultClassLoader ->
+                -> Thread.currentThread().getContextClassLoader() -> getClass().getClassLoader()
+                -> systemClassLoader
+            ClassLoaderWrapper.(URL)getResourceAsURL(String resource, ClassLoader[] classLoader)里，
+            会遍历ClassLoader数组内的所有ClassLoader，并调用url = cl.getResource(resource)（cl是循环内的ClassLoader引用），
+            直到获取到的url不为null，则立刻return urls
+                ClassLoader.(URL)getResource(String name)会先调用父ClassLoader的(URL)getResource(name)方法，
+                如果父ClassLoader为null，则说明父ClassLoader是BootstrapClassLoader，则会调用ClassLoader.(URL)getBootstrapResource(String name)
+                    在ClassLoader.(URL)getBootstrapResource(String name)中，URLClassPath ucp = getBootstrapClassPath()
+                        ClassLoader.(URLClassPath)getBootstrapClassPath()返回了sun.misc.Launcher.getBootstrapClassPath()，
+                        而sun.misc.Launcher.getBootstrapClassPath()返回了BootClassPathHolder.bcp，这个BootClassPathHolder是Launcher的私有内部类，
+                        bcp是BootClassPathHolder里的静态类成员，类型是URLClassPath
+                    在ClassLoader.(URL)getBootstrapResource(String name)中，Resource res = ucp.getResource(name)
