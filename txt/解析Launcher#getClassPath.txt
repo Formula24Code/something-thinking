@@ -1,0 +1,34 @@
+解析Launcher#getClassPath
+Launcher#(File[])getClassPath(String cp)
+java.io.File是文件和目录路径名的抽象表示，并不是真实文件
+
+Launcher#(File[])getClassPath(String cp)方法首先会创建一个局部成员引用File[] path，
+如果传入的cp是null，则path=new File[0]并返回，如果传入的cp不为null，例如传入的是系统属性"sun.boot.class.path"的值：
+D:\Program Files\Zulu\zulu-8\jre\lib\resources.jar;D:\Program Files\Zulu\zulu-8\jre\lib\rt.jar;
+D:\Program Files\Zulu\zulu-8\jre\lib\sunrsasign.jar;D:\Program Files\Zulu\zulu-8\jre\lib\jsse.jar;
+D:\Program Files\Zulu\zulu-8\jre\lib\jce.jar;D:\Program Files\Zulu\zulu-8\jre\lib\charsets.jar;
+D:\Program Files\Zulu\zulu-8\jre\lib\jfr.jar;D:\Program Files\Zulu\zulu-8\jre\lib\cat.jar;
+D:\Program Files\Zulu\zulu-8\jre\classes
+则会执行以下操作：
+定义4个局部int变量count=0、maxCount=1、pos=0、lastPos=0，
+接着进入一个while循环，循环成立条件是pos = cp.indexOf(File.pathSeparator, lastPos)) != -1
+（File.pathSeparator是系统相关的路径分隔符，为方便起见表示为字符串。其实就是空串+char变量，即""+pathSeparatorChar，
+而pathSeparatorChar = fs.()，FileSystem fs = DefaultFileSystem.getFileSystem()，
+使用windows平台的JDK时，DefaultFileSystem.(FileSystem)getFileSystem返回了new WinNTFileSystem()，
+而WinNTFileSystem.(char)getPathSeparator返回的是类成员semicolon，它在WinNTFileSystem的构造器中被初始化，
+其值为System.getProperty("path.separator")，在windows平台上是";"），
+也就是在cp中从lastPos索引位开始查找路径分隔符";"下一次出现的索引，然后将该索引赋值给pos，
+进入循环体内，maxCount++，循环结束前lastPos = pos + 1，
+这样一来，就能通过maxCount统计出有多少个资源路径，（因为cp中最后一个资源路径结尾没有";"，所以maxCount初始值是1）
+然后path = new File[maxCount]; lastPos = pos = 0; 接着再进入一个while循环，循环成立条件是
+while ((pos = cp.indexOf(File.pathSeparator, lastPos)) != -1)（与上一个循环条件一样），
+进入循环体内，如果pos-lastPos>0：path[count++] = new File(cp.substring(lastPos, pos))，在path数组中存入新的File对象，
+调用File构造器时传入的是由cp截取出来的文件路径。否则：path[count++] = new File(".")（pos-lastPos=0说明两个";"相连或者结尾是";"
+，将空路径当成"."）,循环结束前lastPos = pos + 1。
+第一个while循环是为了确定创建File数组的大小，第二个循环给创建后的File数组存入File对象
+接下来，如果lastPos < cp.length()：说明最后一个路径结尾没有分隔符，为了确保最后一个文件也被扫描到，
+path[count++] = new File(cp.substring(lastPos));
+否则：说明cp的结尾肯定是";"，最后一个";"后面也算一个空路径，所以path[count++] = new File(".");
+接下来如果count != maxCount：（什么情况下会出现count != maxCount？暂时没想出来。。。），以count为准重建File[]，
+File[] tmp = new File[count]; System.arraycopy(path, 0, tmp, 0, count); path = tmp;
+最后返回path
