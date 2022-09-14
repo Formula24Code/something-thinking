@@ -35,5 +35,65 @@ Resources.(URL)getResourceURL(String resource)
                     在ClassLoader.(URL)getBootstrapResource(String name)中，URLClassPath ucp = getBootstrapClassPath()
                         ClassLoader.(URLClassPath)getBootstrapClassPath()返回了sun.misc.Launcher.getBootstrapClassPath()，
                         而sun.misc.Launcher.getBootstrapClassPath()返回了BootClassPathHolder.bcp，这个BootClassPathHolder是Launcher的私有内部类，
-                        bcp是BootClassPathHolder里的静态类成员，类型是URLClassPath
+                        bcp是BootClassPathHolder里的静态类成员，类型是URLClassPath，BootClassPathHolder静态代码块对bcp进行赋值
+                            BootClassPathHolder静态代码块里定义了局部成员URL[] urls，File[] classPath = getClassPath(bootClassPath)，
+                            调用了Launcher.(File[])getClassPath(String cp)，传入的bootClassPath值为系统属性"sun.boot.class.path"的值，
+                            "sun.boot.class.path"的路径包括jre\lib下的jar包和jre\classes目录（Launcher.(File[])getClassPath(String cp)的代码具体解析请参考其他文件），
+                            局部成员int len = classPath.length，
+                            局部成员Set<File> seenDirs = new HashSet<File>()，然后进入for循环for (int i = 0; i < len; i++)，
+                            局部成员File curEntry = classPath[i]，如果curEntry是文件不是目录，就将curEntry变为该文件所在的目录，
+                            如果curEntry不为null，并且curEntry被成功添加到seenDirs中，就会将curEntry注册到MetaIndex的缓存中，
+                            最后将urls赋值为pathToURLs(classPath)
+                                Launcher.(URL[])pathToURLs(File[] path)中，URL[] urls = new URL[path.length]，
+                                进入for (int i = 0; i < path.length; i++)，urls[i] = getFileURL(path[i])
+                                    Launcher.(URL)getFileURL(File file)中，file = file.getCanonicalFile()，
+                                        file.getCanonicalFile()可以获取到路径是绝对的File对象（如果原来File对象是相对路径的，则新File对象为相对路径对应的绝对路径）
+                                    String path = file.getAbsolutePath(); //获取绝对路径
+                                    path = ParseUtil.encodePath(path); //构造适用于构造 URL 的指定路径字符串的编码版本
+                                    如果path不是以'/'开头，则开头加上'/'；如果path是个目录并且结尾没有'/'，则结尾加上'/'
+                                    return new URL("file", "", path)
+                                        URL(String protocol, String host, String file)三个参数分别表示协议、主机、主机上的文件
+                                        URL的协议还可以是http、https、jar，重载的构造器还可以对端口、URL的流处理程序赋值
                     在ClassLoader.(URL)getBootstrapResource(String name)中，Resource res = ucp.getResource(name)
+                通常情况下是由AppClassLoader来获取URL，所以会调用URLClassLoader.(URL)findResource(final String name)
+                    findResource中又会调用ucp.findResource(name, true)，这里的类成员ucp是URLClassPath类型，
+                    URLClassPath用于维护URL 的搜索路径，以便从 JAR 文件和目录中加载类和资源
+                    如果找不到资源，则返回null
+
+Resources.(InputStream)getResourceAsStream(String resource)
+    getResourceAsStream与getResourceURL情况类似，也是会在ClassLoaderWrapper遍历一堆ClassLoader，
+    并且执行cl.getResourceAsStream(resource)操作（这里的cl为循环内的局部ClassLoader对象）
+        以URLClassLoader.(InputStream)getResourceAsStream(String name)为例，会先调用URL url = getResource(name)获取URL对象，
+        然后URLConnection urlc = url.openConnection(); InputStream is = urlc.getInputStream(); 
+        然后判断urlc instanceof JarURLConnection，如果成立，
+        则JarURLConnection juc = (JarURLConnection)urlc; JarFile jar = juc.getJarFile(); （这里看不懂啥意思）
+        最后return is
+
+Resources.(Properties)getResourceAsProperties(String resource)
+    Properties props = new Properties(); //类型是java.util.Properties
+    调用自己的getResourceAsStream方法InputStream in = getResourceAsStream(resource)
+    props.load(in); //java.util.Properties#load(java.io.InputStream)
+    最后return props;
+
+Resources.(Reader)getResourceAsReader(String resource)
+    java.io.Reader是用于读取字符流的抽象类。
+    reader = new InputStreamReader(getResourceAsStream(resource));
+    这里也是调用自己的getResourceAsStream方法、
+
+Resources.(File)getResourceAsFile(String resource)
+    return new File(getResourceURL(resource).getFile());
+
+Resources.(InputStream)getUrlAsStream(String urlString)
+    URL url = new URL(urlString);
+    URLConnection conn = url.openConnection();
+    return conn.getInputStream();
+
+getUrlAsReader：
+    reader = new InputStreamReader(getUrlAsStream(urlString));
+
+getUrlAsProperties：
+    Properties props = new Properties();
+    try (InputStream in = getUrlAsStream(urlString)) {
+      props.load(in);
+    }
+    return props;
