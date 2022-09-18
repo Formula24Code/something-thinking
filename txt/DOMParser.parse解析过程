@@ -1,0 +1,267 @@
+DOMParser.parse解析过程
+
+org.apache.ibatis.parsing.XPathParser#createDocument里创建了DocumentBuilder对象：
+    DocumentBuilder builder = factory.newDocumentBuilder();
+    return builder.parse(inputSource);
+默认情况下该对象实现类型是DocumentBuilderImpl，创建好DocumentBuilderImpl对象后，
+调用其parse(InputSource is)，传入封装了用户的mybatis配置文件流的InputSource，
+com.sun.org.apache.xerces.internal.jaxp.DocumentBuilderImpl#parse
+    public Document parse(InputSource is) throws SAXException, IOException {
+        if (is == null) {
+            throw new IllegalArgumentException(
+                DOMMessageFormatter.formatMessage(DOMMessageFormatter.DOM_DOMAIN,
+                "jaxp-null-input-source", null));
+        }
+        if (fSchemaValidator != null) {
+            if (fSchemaValidationManager != null) {
+                fSchemaValidationManager.reset();
+                fUnparsedEntityHandler.reset();
+            }
+            resetSchemaValidator();
+        }
+        domParser.parse(is);
+        Document doc = domParser.getDocument();
+        domParser.dropDocumentReferences();
+        return doc;
+    }
+
+com.sun.org.apache.xerces.internal.parsers.DOMParser#parse(org.xml.sax.InputSource)
+        // parse document
+        try {
+            XMLInputSource xmlInputSource =
+                new XMLInputSource(inputSource.getPublicId(),
+                                   inputSource.getSystemId(),
+                                   null);
+            xmlInputSource.setByteStream(inputSource.getByteStream());
+            xmlInputSource.setCharacterStream(inputSource.getCharacterStream());
+            xmlInputSource.setEncoding(inputSource.getEncoding());
+            parse(xmlInputSource); //这里调用XMLParser#parse
+        }
+
+com.sun.org.apache.xerces.internal.parsers.XMLParser#parse
+        // protected XMLParserConfiguration fConfiguration; //解析器配置
+        // XMLParserConfiguration是接口，这里实现类是XIncludeAwareParserConfiguration
+        // XIncludeAwareParserConfiguration是用于解析 XML 1.0 和 XML 1.1 文档的配置，并提供对 XInclude 的支持
+        fConfiguration.parse(inputSource); 
+
+由于XIncludeAwareParserConfiguration本身没有parse方法，但它的父类XML11Configuration有parse方法：
+    public void parse(XMLInputSource source) throws XNIException, IOException {
+
+        if (fParseInProgress) {
+            // REVISIT - need to add new error message
+            throw new XNIException("FWK005 parse may not be called while parsing.");
+        }
+        fParseInProgress = true;
+
+        try {
+            setInputSource(source);
+            parse(true);
+        }
+        ......
+
+    public boolean parse(boolean complete) throws XNIException, IOException {
+        //
+        // reset and configure pipeline and set InputSource.
+        if (fInputSource != null) {
+            try {
+                ......
+                if (version == Constants.XML_VERSION_1_1) {
+                    initXML11Components();
+                    configureXML11Pipeline();
+                    resetXML11();
+                } else {
+                    //mybatis官方示例的xml文件版本是1.0，所以走else
+                    configurePipeline();
+                    reset();
+                }
+                ......
+
+                // resets and sets the pipeline.
+                fVersionDetector.startDocumentParsing((XMLEntityHandler) fCurrentScanner, version);
+                fInputSource = null;
+            } 
+            ......
+            try {
+                // protected XMLDocumentScanner fCurrentScanner;
+                // 这里fCurrentScanner是XMLDocumentScannerImpl类型
+                return fCurrentScanner.scanDocument(complete);
+            }
+
+XMLDocumentScannerImpl本身没有scanDocument方法，不过它的父类XMLDocumentFragmentScannerImpl有
+com.sun.org.apache.xerces.internal.impl.XMLDocumentFragmentScannerImpl#scanDocument扫描文档
+    public boolean scanDocument(boolean complete)
+    throws IOException, XNIException {
+
+        // keep dispatching "events"
+        fEntityManager.setEntityHandler(this);
+        //System.out.println(" get Document Handler in NSDocumentHandler " + fDocumentHandler );
+
+        int event = next();
+        do {
+            switch (event) {
+                case XMLStreamConstants.START_DOCUMENT :
+                    //fDocumentHandler.startDocument(fEntityManager.getEntityScanner(),fEntityManager.getEntityScanner().getVersion(),fNamespaceContext,null);// not able to get
+                    break;
+                case XMLStreamConstants.START_ELEMENT :
+                    //System.out.println(" in scann element");
+                    //fDocumentHandler.startElement(getElementQName(),fAttributes,null);
+                    break;
+                case XMLStreamConstants.CHARACTERS :
+                    fEntityScanner.checkNodeCount(fEntityScanner.fCurrentEntity);
+                    fDocumentHandler.characters(getCharacterData(),null);
+                    break;
+                case XMLStreamConstants.SPACE:
+                    //check if getCharacterData() is the right function to retrieve ignorableWhitespace information.
+                    //System.out.println("in the space");
+                    //fDocumentHandler.ignorableWhitespace(getCharacterData(), null);
+                    break;
+                case XMLStreamConstants.ENTITY_REFERENCE :
+                    fEntityScanner.checkNodeCount(fEntityScanner.fCurrentEntity);
+                    //entity reference callback are given in startEntity
+                    break;
+                case XMLStreamConstants.PROCESSING_INSTRUCTION :
+                    fEntityScanner.checkNodeCount(fEntityScanner.fCurrentEntity);
+                    fDocumentHandler.processingInstruction(getPITarget(),getPIData(),null);
+                    break;
+                case XMLStreamConstants.COMMENT :
+                    fEntityScanner.checkNodeCount(fEntityScanner.fCurrentEntity);
+                    fDocumentHandler.comment(getCharacterData(),null);
+                    break;
+                case XMLStreamConstants.DTD :
+                    //all DTD related callbacks are handled in DTDScanner.
+                    //1. Stax doesn't define DTD states as it does for XML Document.
+                    //therefore we don't need to take care of anything here. So Just break;
+                    break;
+                case XMLStreamConstants.CDATA:
+                    fEntityScanner.checkNodeCount(fEntityScanner.fCurrentEntity);
+                    fDocumentHandler.startCDATA(null);
+                    //xxx: check if CDATA values comes from getCharacterData() function
+                    fDocumentHandler.characters(getCharacterData(),null);
+                    fDocumentHandler.endCDATA(null);
+                    //System.out.println(" in CDATA of the XMLNSDocumentScannerImpl");
+                    break;
+                case XMLStreamConstants.NOTATION_DECLARATION :
+                    break;
+                case XMLStreamConstants.ENTITY_DECLARATION :
+                    break;
+                case XMLStreamConstants.NAMESPACE :
+                    break;
+                case XMLStreamConstants.ATTRIBUTE :
+                    break;
+                case XMLStreamConstants.END_ELEMENT :
+                    //do not give callback here.
+                    //this callback is given in scanEndElement function.
+                    //fDocumentHandler.endElement(getElementQName(),null);
+                    break;
+                default :
+                    throw new InternalError("processing event: " + event);
+
+            }
+            //System.out.println("here in before calling next");
+            event = next();
+            //System.out.println("here in after calling next");
+        } while (event!=XMLStreamConstants.END_DOCUMENT && complete);
+
+        if(event == XMLStreamConstants.END_DOCUMENT) {
+            fDocumentHandler.endDocument(null);
+            return false;
+        }
+
+        return true;
+
+    } // scanDocument(boolean):boolean
+
+    public int next() throws IOException, XNIException {
+        return fDriver.next(); //fDriver是XMLDeclDriver类的对象
+    }
+
+com.sun.org.apache.xerces.internal.impl.XMLDocumentScannerImpl.XMLDeclDriver#next
+        public int next() throws IOException, XNIException {
+            ...
+            // next driver is prolog regardless of whether there
+            // is an XMLDecl in this document
+            setScannerState(SCANNER_STATE_PROLOG);
+            setDriver(fPrologDriver);
+
+            ...
+            // scan XMLDecl
+            try {
+                if (fEntityScanner.skipString(xmlDecl)) {
+                    fMarkupDepth++;
+                    // NOTE: special case where document starts with a PI
+                    //       whose name starts with "xml" (e.g. "xmlfoo")
+                    if (XMLChar.isName(fEntityScanner.peekChar())) {
+                        fStringBuffer.clear();
+                        fStringBuffer.append("xml");
+                        while (XMLChar.isName(fEntityScanner.peekChar())) {
+                            fStringBuffer.append((char)fEntityScanner.scanChar(null));
+                        }
+                        String target = fSymbolTable.addSymbol(fStringBuffer.ch, fStringBuffer.offset, fStringBuffer.length);
+                        //this function should fill the data.. and set the fEvent object to this event.
+                        fContentBuffer.clear() ;
+                        scanPIData(target, fContentBuffer);
+                        //REVISIT:where else we can set this value to 'true'
+                        fEntityManager.fCurrentEntity.mayReadChunks = true;
+                        //return PI event since PI was encountered
+                        return XMLEvent.PROCESSING_INSTRUCTION ;
+                    }
+                    // standard XML declaration
+                    else {
+                        scanXMLDeclOrTextDecl(false);
+                        //REVISIT:where else we can set this value to 'true'
+                        fEntityManager.fCurrentEntity.mayReadChunks = true;
+                        return XMLEvent.START_DOCUMENT;
+                    }
+                } else{
+                    //REVISIT:where else we can set this value to 'true'
+                    fEntityManager.fCurrentEntity.mayReadChunks = true;
+                    //In both case return the START_DOCUMENT. ony difference is that first block will
+                    //cosume the XML declaration if any.
+                    return XMLEvent.START_DOCUMENT;
+                }
+
+
+                //START_OF_THE_DOCUMENT
+
+
+            }
+
+            // premature end of file
+            catch (EOFException e) {
+                reportFatalError("PrematureEOF", null);
+                return -1;
+                //throw e;
+            }
+
+        }
+    } // class XMLDeclDriver
+
+如何扫描，建议还是举个例子来看看，mybatis单元测试包下有个
+org/apache/ibatis/autoconstructor/mybatis-config.xml文件：
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE configuration
+        PUBLIC "-//mybatis.org//DTD Config 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-config.dtd">
+
+<configuration>
+
+    <!-- autoMappingBehavior should be set in each test case -->
+
+    <environments default="development">
+        <environment id="development">
+            <transactionManager type="JDBC">
+                <property name="" value=""/>
+            </transactionManager>
+            <dataSource type="UNPOOLED">
+                <property name="driver" value="org.hsqldb.jdbcDriver"/>
+                <property name="url" value="jdbc:hsqldb:mem:automapping"/>
+                <property name="username" value="sa"/>
+            </dataSource>
+        </environment>
+    </environments>
+
+    <mappers>
+        <mapper resource="org/apache/ibatis/autoconstructor/AutoConstructorMapper.xml"/>
+    </mappers>
+
+</configuration>

@@ -1,0 +1,148 @@
+DocumentBuilderFactory与DocumentBuilder
+
+JAXP（Java API for XMLProcessing，意为XML处理的Java API）是Java XML程序设计的应用程序接口之一，
+它提供解析和验证XML文档的能力。JAXP是在Java社区进程下开发的，
+包括JSR 5 （JAXP 1.0）和 JSR 63 （JAXP 1.1和1.2）两个规范。
+JAXP解析XML的三种基本接口为：
+文档对象模型解析接口或DOM接口
+XML简单API解析接口或SAX接口
+XML流API或StAX接口（是JDK 6的一部分，为JDK 5提供单独的包）
+除了解析接口，JAXP还提供了XSLT接口用来对XML文档进行数据和结构的转换。
+
+DOM接口可能最容易理解。解析器解析整个XML文档并构造出该文档的一个完整的内存表示，
+使用类对文档对象模型（DOM）级别2核心规范中的概念进行建模。
+DOM解析器被称作DocumentBuilder，因为它构建一个内存中的Document表示。
+javax.xml.parsers.DocumentBuilder是由javax.xml.parsers.DocumentBuilderFactory创建的。
+DocumentBuilder创建org.w3c.dom.Document的实例，Document是一个包含XML文档中的所有节点的树。
+结构中的每一个树节点实现org.w3c.dom.Node接口。树节点有许多不同类型的，表示XML文档中不同的数据类型。
+最重要的节点类型有：
+元素节点，具有许多属性
+文本节点，代表文档元素开始和结束标签之间的文字。
+
+javax.xml.parsers.DocumentBuilderFactory定义一个工厂 API，使应用程序能够获得一个解析器，
+该解析器从 XML 文档生成 DOM 对象树。该类是抽象类。
+javax.xml.parsers.DocumentBuilder定义 API 以从 XML 文档中获取 DOM 文档实例。
+使用这个类，程序员可以从 XML 中获取Document 。该类是抽象类。
+
+org.apache.ibatis.parsing.XPathParser#createDocument调用了DocumentBuilderFactory的newInstance()
+    public static DocumentBuilderFactory newInstance() {
+        return FactoryFinder.find(
+                // JAXP是XML处理的Java API，
+                /* The default property name according to the JAXP spec */
+                DocumentBuilderFactory.class, // "javax.xml.parsers.DocumentBuilderFactory"
+                /* The fallback implementation class name */
+                "com.sun.org.apache.xerces.internal.jaxp.DocumentBuilderFactoryImpl");
+    }
+
+FactoryFinder的find方法：
+    /**
+     * Finds the implementation Class object in the specified order.  Main
+     * entry point.
+     * @return Class object of factory, never null
+     *
+     * @param type                  Base class / Service interface  of the
+     *                              factory to find.
+     * @param fallbackClassName     Implementation class name, if nothing else
+     *                              is found.  Use null to mean no fallback.
+     *
+     * Package private so this code can be shared.
+     */
+    static <T> T find(Class<T> type, String fallbackClassName)
+        throws FactoryConfigurationError
+    {   
+        // 这里拿到的factoryId是"javax.xml.parsers.DocumentBuilderFactory"
+        final String factoryId = type.getName();
+        dPrint("find factoryId =" + factoryId);
+
+        // Use the system property first
+        try {
+            // 这里其实调用System.getProperty("javax.xml.parsers.DocumentBuilderFactory")
+            // 没有设置的话，拿到null
+            String systemProp = ss.getSystemProperty(factoryId);
+            if (systemProp != null) {
+                dPrint("found system property, value=" + systemProp);
+                return newInstance(type, systemProp, null, true);
+            }
+        }
+        catch (SecurityException se) {
+            if (debug) se.printStackTrace();
+        }
+
+        // try to read from $java.home/lib/jaxp.properties
+        try {
+            if (firstTime) {
+                synchronized (cacheProps) {
+                    if (firstTime) {
+                        String configFile = ss.getSystemProperty("java.home") + File.separator +
+                            "lib" + File.separator + "jaxp.properties";
+                        File f = new File(configFile);
+                        firstTime = false;
+                        if (ss.doesFileExist(f)) {
+                            dPrint("Read properties file "+f);
+                            cacheProps.load(ss.getFileInputStream(f));
+                        }
+                    }
+                }
+            }
+            final String factoryClassName = cacheProps.getProperty(factoryId);
+
+            if (factoryClassName != null) {
+                dPrint("found in $java.home/jaxp.properties, value=" + factoryClassName);
+                return newInstance(type, factoryClassName, null, true);
+            }
+        }
+        catch (Exception ex) {
+            if (debug) ex.printStackTrace();
+        }
+
+        // Try Jar Service Provider Mechanism
+        T provider = findServiceProvider(type);
+        if (provider != null) {
+            return provider;
+        }
+        if (fallbackClassName == null) {
+            throw new FactoryConfigurationError(
+                "Provider for " + factoryId + " cannot be found");
+        }
+
+        dPrint("loaded from fallback value: " + fallbackClassName);
+        return newInstance(type, fallbackClassName, null, true);
+    }
+
+从以上代码不难看出，FactoryFinder的find方法与XPathFactoryFinder的_newFactory有类似之处，
+都是按照系统属性定义 -> $java.home/lib/jaxp.properties -> 默认实现类来创建对象的
+
+org.apache.ibatis.parsing.XPathParser#createDocument里调用了
+com.sun.org.apache.xerces.internal.jaxp.DocumentBuilderFactoryImpl#newDocumentBuilder
+DocumentBuilderFactoryImpl#newDocumentBuilder：
+    public DocumentBuilder newDocumentBuilder()
+        throws ParserConfigurationException
+    {   
+        // 
+        /** Check that if a Schema has been specified that neither of the schema properties have been set. */
+        if (grammar != null && attributes != null) {
+            if (attributes.containsKey(JAXPConstants.JAXP_SCHEMA_LANGUAGE)) {
+                throw new ParserConfigurationException(
+                        SAXMessageFormatter.formatMessage(null,
+                        "schema-already-specified", new Object[] {JAXPConstants.JAXP_SCHEMA_LANGUAGE}));
+            }
+            else if (attributes.containsKey(JAXPConstants.JAXP_SCHEMA_SOURCE)) {
+                throw new ParserConfigurationException(
+                        SAXMessageFormatter.formatMessage(null,
+                        "schema-already-specified", new Object[] {JAXPConstants.JAXP_SCHEMA_SOURCE}));
+            }
+        }
+
+        try {
+            // private Map<String, Object> attributes;
+            // private Map<String, Boolean> features;
+            // private boolean fSecureProcess = true;
+            return new DocumentBuilderImpl(this, attributes, features, fSecureProcess);
+        } catch (SAXException se) {
+            // Handles both SAXNotSupportedException, SAXNotRecognizedException
+            throw new ParserConfigurationException(se.getMessage());
+        }
+    }
+
+DocumentBuilderImpl的构造器里创建了DOMParser对象也就是DOM解析器：
+domParser = new DOMParser();
